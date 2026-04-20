@@ -1,0 +1,112 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand-bg: #FDF6EE;
+  --brand-heading: #3B1D06;
+  --brand-text: #3B1D06CC;
+  --brand-pink: #EB2676;
+  --brand-hover: #9A378A;
+  --brand-border: #3B1D060F;
+  --brand-btn: #FDE337;
+  --brand-btn-hover: #FF601B;
+  --brand-btn-text: #3B1D06;
+  --brand-shadow: #3B1D06;
+}
+
+@layer base {
+  html {
+    font-family: 'DM Sans', sans-serif;
+    background-color: var(--brand-bg);
+    color: var(--brand-heading);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'DM Serif Display', serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand-btn text-brand-btnText font-semibold px-6 py-3 rounded-xl transition-all duration-200 hover:bg-brand-btnHover active:scale-95 shadow-sm;
+  }
+
+  .btn-pink {
+    @apply bg-brand-pink text-white font-semibold px-6 py-3 rounded-xl transition-all duration-200 hover:bg-brand-hover active:scale-95 shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-brand-pink font-semibold px-4 py-2 rounded-xl border border-brand-pink transition-all duration-200 hover:bg-brand-pink hover:text-white active:scale-95;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-brand-border p-4;
+  }
+
+  .pill {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .pill-good {
+    @apply pill bg-green-100 text-green-700;
+  }
+
+  .pill-low {
+    @apply pill bg-amber-100 text-amber-700;
+  }
+
+  .pill-critical {
+    @apply pill bg-pink-100 text-brand-pink;
+  }
+
+  .pill-pending {
+    @apply pill bg-yellow-100 text-yellow-700;
+  }
+
+  .pill-approved {
+    @apply pill bg-green-100 text-green-700;
+  }
+
+  .pill-rejected {
+    @apply pill bg-red-100 text-red-600;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-brand-heading placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-pink/30 focus:border-brand-pink transition-all duration-200;
+  }
+
+  .label {
+    @apply block text-sm font-semibold text-brand-heading mb-1.5;
+  }
+
+  .section-title {
+    @apply font-serif text-xl text-brand-heading;
+  }
+}
+
+/* Bottom nav safe area */
+.pb-nav {
+  padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3B1D0620;
+  border-radius: 2px;
+}
