@@ -4,7 +4,6 @@ import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     LineChart, Line, Legend,
 } from "recharts";
-import { PACK_TYPE_LABELS, PackType } from "@/lib/types";
 
 interface AnalyticsData {
     outwardByReason: { reason: string; count: number }[];

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition, useOptimistic } from "react";
-import { PACK_TYPE_LABELS, PackType } from "@/lib/types";
 import { approveEntry, rejectEntry } from "@/lib/actions/approvals";
 import toast from "react-hot-toast";
 
@@ -83,7 +82,7 @@ function ApprovalCard({ batch, onApprove, onReject }: { batch: any; onApprove: (
                 </span>
                 <span className="text-xs text-brand-text/50">{batch.date}</span>
                 <span className="text-xs text-brand-text/50">·</span>
-                <span className="text-xs text-brand-text/50">{PACK_TYPE_LABELS[batch.pack_type as PackType] ?? batch.pack_type}</span>
+                <span className="text-xs text-brand-text/50">{batch.pack_type}</span>
                 <span className="ml-auto text-xs text-brand-text/40">by {batch.submitter?.name ?? "Unknown"}</span>
             </div>
 

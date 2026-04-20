@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { SKU, PACK_TYPE_LABELS, PackType } from "@/lib/types";
+import { SKU, PackTypeRecord } from "@/lib/types";
 import { openStall, logReturn } from "@/lib/actions/stalls";
 import { createConversion, completeConversion } from "@/lib/actions/conversions";
 import toast from "react-hot-toast";
@@ -10,9 +10,10 @@ interface Props {
     skus: SKU[];
     initialStalls: any[];
     initialConversions: any[];
+    packTypes: PackTypeRecord[];
 }
 
-export default function StallsClient({ skus, initialStalls, initialConversions }: Props) {
+export default function StallsClient({ skus, initialStalls, initialConversions, packTypes }: Props) {
     const [stalls, setStalls] = useState(initialStalls);
     const [conversions, setConversions] = useState(initialConversions);
     const [isPending, startTransition] = useTransition();
@@ -24,11 +25,17 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
     const [stallLocation, setStallLocation] = useState("");
     const [stallDate, setStallDate] = useState(new Date().toISOString().split("T")[0]);
     const [stallSkuId, setStallSkuId] = useState(skus[0]?.id ?? "");
-    const [stallPackType, setStallPackType] = useState<PackType>("30g_individual");
+    const [stallPackType, setStallPackType] = useState<string>(packTypes[0]?.name ?? "30g_individual");
     const [stallDispatched, setStallDispatched] = useState(1);
 
     const [wipSkuId, setWipSkuId] = useState(skus[0]?.id ?? "");
-    const [wipPacks, setWipPacks] = useState(6);
+    const [wipFromPackType, setWipFromPackType] = useState<string>(packTypes[0]?.name ?? "30g_individual");
+    const [wipToPackType, setWipToPackType] = useState<string>(packTypes[1]?.name ?? "pack_of_6");
+    const [wipInputQty, setWipInputQty] = useState(1);
+    const [wipOutputQty, setWipOutputQty] = useState(1);
+
+    const packTypeLabel = (name: string) =>
+        packTypes.find((pt) => pt.name === name)?.label ?? name;
 
     const handleOpenStall = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -56,10 +63,17 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
 
     const handleCreateConversion = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (wipPacks < 6) { toast.error("Minimum 6 packs for conversion"); return; }
+        if (wipFromPackType === wipToPackType) { toast.error("From and To pack types must differ"); return; }
+        if (wipInputQty <= 0 || wipOutputQty <= 0) { toast.error("Quantities must be greater than 0"); return; }
         startTransition(async () => {
             try {
-                await createConversion({ skuId: wipSkuId, packs30gIn: wipPacks });
+                await createConversion({
+                    skuId: wipSkuId,
+                    fromPackType: wipFromPackType,
+                    toPackType: wipToPackType,
+                    inputQty: wipInputQty,
+                    outputQty: wipOutputQty,
+                });
                 toast.success("Conversion created");
                 setShowWipForm(false);
             } catch (err: any) { toast.error(err.message); }
@@ -80,6 +94,7 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
 
     return (
         <div className="px-4 py-5 max-w-2xl mx-auto space-y-6">
+            {/* Stall Manager */}
             <div>
                 <div className="flex items-center justify-between mb-3">
                     <h2 className="section-title">Stall Manager</h2>
@@ -120,9 +135,9 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
                             </div>
                             <div>
                                 <label className="label">Pack Type</label>
-                                <select value={stallPackType} onChange={(e) => setStallPackType(e.target.value as PackType)} className="input">
-                                    {(["30g_individual", "pack_of_6", "sample_200g"] as PackType[]).map((pt) => (
-                                        <option key={pt} value={pt}>{PACK_TYPE_LABELS[pt]}</option>
+                                <select value={stallPackType} onChange={(e) => setStallPackType(e.target.value)} className="input">
+                                    {packTypes.map((pt) => (
+                                        <option key={pt.name} value={pt.name}>{pt.label}</option>
                                     ))}
                                 </select>
                             </div>
@@ -152,7 +167,7 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
                                 return (
                                     <div key={item.id} className="space-y-2">
                                         <div className="flex items-center justify-between text-sm">
-                                            <span className="text-brand-text/70">{item.sku?.name ?? "?"} · {PACK_TYPE_LABELS[item.pack_type as PackType]}</span>
+                                            <span className="text-brand-text/70">{item.sku?.name ?? "?"} · {packTypeLabel(item.pack_type)}</span>
                                             <span className="font-semibold">{sold} sold / {dispatched} dispatched</span>
                                         </div>
                                         <div className="w-full bg-gray-100 rounded-full h-2">
@@ -193,6 +208,7 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
                 )}
             </div>
 
+            {/* WIP Conversions */}
             <div>
                 <div className="flex items-center justify-between mb-3">
                     <h2 className="section-title">WIP Conversions</h2>
@@ -203,22 +219,45 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
 
                 {showWipForm && (
                     <form onSubmit={handleCreateConversion} className="card space-y-4 mb-4">
-                        <h3 className="font-serif text-base">30g → Pack of 6</h3>
+                        <h3 className="font-serif text-base">New Pack Conversion</h3>
+                        <div>
+                            <label className="label">SKU</label>
+                            <select value={wipSkuId} onChange={(e) => setWipSkuId(e.target.value)} className="input">
+                                {skus.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                            </select>
+                        </div>
                         <div className="grid grid-cols-2 gap-3">
                             <div>
-                                <label className="label">SKU</label>
-                                <select value={wipSkuId} onChange={(e) => setWipSkuId(e.target.value)} className="input">
-                                    {skus.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                <label className="label">From Pack Type</label>
+                                <select value={wipFromPackType} onChange={(e) => setWipFromPackType(e.target.value)} className="input">
+                                    {packTypes.map((pt) => (
+                                        <option key={pt.name} value={pt.name}>{pt.label}</option>
+                                    ))}
                                 </select>
                             </div>
                             <div>
-                                <label className="label">30g Packs In</label>
-                                <input type="number" min={6} step={6} value={wipPacks} onChange={(e) => setWipPacks(parseInt(e.target.value) || 6)} className="input" />
+                                <label className="label">To Pack Type</label>
+                                <select value={wipToPackType} onChange={(e) => setWipToPackType(e.target.value)} className="input">
+                                    {packTypes.map((pt) => (
+                                        <option key={pt.name} value={pt.name}>{pt.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="label">Input Qty (consumed)</label>
+                                <input type="number" min={1} value={wipInputQty} onChange={(e) => setWipInputQty(parseInt(e.target.value) || 1)} className="input" />
+                            </div>
+                            <div>
+                                <label className="label">Output Qty (produced)</label>
+                                <input type="number" min={1} value={wipOutputQty} onChange={(e) => setWipOutputQty(parseInt(e.target.value) || 1)} className="input" />
                             </div>
                         </div>
                         <div className="bg-brand-bg rounded-xl p-3 text-sm">
-                            <p className="text-brand-heading font-semibold">{wipPacks} packs → {Math.floor(wipPacks / 6)} Pack of 6</p>
-                            {wipPacks % 6 !== 0 && <p className="text-amber-600 text-xs mt-1">⚠️ {wipPacks % 6} leftover packs (will not be converted)</p>}
+                            <p className="text-brand-heading font-semibold">
+                                {wipInputQty} × {packTypeLabel(wipFromPackType)} → {wipOutputQty} × {packTypeLabel(wipToPackType)}
+                            </p>
                         </div>
                         <button type="submit" disabled={isPending} className="btn-primary w-full">Create Conversion</button>
                     </form>
@@ -232,7 +271,9 @@ export default function StallsClient({ skus, initialStalls, initialConversions }
                             <div key={conv.id} className="card flex items-center gap-3">
                                 <div className="flex-1">
                                     <p className="text-sm font-semibold text-brand-heading">{conv.sku?.name ?? "?"}</p>
-                                    <p className="text-xs text-brand-text/50">{conv.packs_30g_in} → {conv.packs_of_6_out} Pack of 6</p>
+                                    <p className="text-xs text-brand-text/50">
+                                        {conv.input_qty} × {packTypeLabel(conv.from_pack_type)} → {conv.output_qty} × {packTypeLabel(conv.to_pack_type)}
+                                    </p>
                                 </div>
                                 {conv.status === "in_progress" ? (
                                     <button onClick={() => handleCompleteConversion(conv.id)} disabled={isPending} className="btn-pink text-xs py-1.5 px-3">Mark Done</button>

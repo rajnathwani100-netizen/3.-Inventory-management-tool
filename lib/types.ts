@@ -17,7 +17,17 @@ export interface SKU {
     created_at: string;
 }
 
-export type PackType = "30g_individual" | "pack_of_6" | "sample_200g";
+export interface PackTypeRecord {
+    id: string;
+    name: string;
+    label: string;
+    is_active: boolean;
+    sort_order: number;
+}
+
+// PackType is now a plain string — the set of valid values lives in the DB
+export type PackType = string;
+
 export type EntryStatus = "pending" | "approved" | "rejected";
 export type StallStatus = "active" | "closed";
 export type WipStatus = "in_progress" | "completed";
@@ -81,20 +91,16 @@ export interface StallItem {
 export interface WipConversion {
     id: string;
     sku_id: string;
-    packs_30g_in: number;
-    packs_of_6_out: number;
+    from_pack_type: string;
+    to_pack_type: string;
+    input_qty: number;
+    output_qty: number;
     status: WipStatus;
     created_by: string | null;
     completed_at: string | null;
     created_at: string;
     sku?: SKU;
 }
-
-export const PACK_TYPE_LABELS: Record<PackType, string> = {
-    "30g_individual": "30g Individual",
-    pack_of_6: "Pack of 6",
-    sample_200g: "200g Sample",
-};
 
 export const INWARD_REASONS = [
     "Purchase",

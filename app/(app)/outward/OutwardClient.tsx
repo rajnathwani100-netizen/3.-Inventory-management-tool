@@ -2,18 +2,22 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { SKU, PACK_TYPE_LABELS, OUTWARD_REASONS, PackType } from "@/lib/types";
+import { SKU, PackTypeRecord, OUTWARD_REASONS } from "@/lib/types";
 import BatchSkuPicker from "@/components/forms/BatchSkuPicker";
 import ReasonPicker from "@/components/forms/ReasonPicker";
 import { submitBatchEntry } from "@/lib/actions/inward";
 import { generateCSV, formatDateForFilename } from "@/lib/utils/csv";
 import toast from "react-hot-toast";
 
-const PACK_TYPES: PackType[] = ["30g_individual", "pack_of_6", "sample_200g"];
+interface Props {
+    skus: SKU[];
+    initialBatches: any[];
+    packTypes: PackTypeRecord[];
+}
 
-export default function OutwardClient({ skus: initialSkus, initialBatches }: { skus: SKU[]; initialBatches: any[] }) {
+export default function OutwardClient({ skus: initialSkus, initialBatches, packTypes }: Props) {
     const [skus, setSkus] = useState<SKU[]>(initialSkus);
-    const [packType, setPackType] = useState<PackType>("30g_individual");
+    const [packType, setPackType] = useState<string>(packTypes[0]?.name ?? "30g_individual");
     const [reason, setReason] = useState("");
     const [items, setItems] = useState<{ skuId: string; quantity: number }[]>([]);
     const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
@@ -28,6 +32,9 @@ export default function OutwardClient({ skus: initialSkus, initialBatches }: { s
             .then(({ data }) => { if (data && data.length > 0) setSkus(data); });
     }, []);
 
+    const packTypeLabel = (name: string) =>
+        packTypes.find((pt) => pt.name === name)?.label ?? name;
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const actualReason = reason === "__custom__" ? "" : reason;
@@ -40,7 +47,11 @@ export default function OutwardClient({ skus: initialSkus, initialBatches }: { s
                 toast.success("Outward entry submitted for approval");
                 setItems([]); setReason(""); setNotes(""); setShowForm(false);
                 const supabase = createClient();
-                const { data } = await supabase.from("entry_batches").select("*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)").eq("direction", "outward").order("created_at", { ascending: false }).limit(20);
+                const { data } = await supabase.from("entry_batches")
+                    .select("*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)")
+                    .eq("direction", "outward")
+                    .order("created_at", { ascending: false })
+                    .limit(20);
                 if (data) setBatches(data);
             } catch (err: any) { toast.error(err.message); }
         });
@@ -50,7 +61,7 @@ export default function OutwardClient({ skus: initialSkus, initialBatches }: { s
         const rows = batches.filter((b) => b.status === "approved").flatMap((b: any) =>
             (b.batch_items || []).map((item: any) => ({
                 Date: b.date, "SKU Code": item.sku?.code ?? "", "SKU Name": item.sku?.name ?? "",
-                "Pack Type": PACK_TYPE_LABELS[b.pack_type as PackType] ?? b.pack_type,
+                "Pack Type": packTypeLabel(b.pack_type),
                 Quantity: item.quantity, Reason: b.reason, Notes: b.notes ?? "",
                 Status: b.status, "Submitted By": b.submitter?.name ?? "", "Approved Date": b.approved_at ?? "",
             }))
@@ -76,10 +87,10 @@ export default function OutwardClient({ skus: initialSkus, initialBatches }: { s
                     <div>
                         <label className="label">Pack Type</label>
                         <div className="flex gap-2 flex-wrap">
-                            {PACK_TYPES.map((pt) => (
-                                <button key={pt} type="button" onClick={() => setPackType(pt)}
-                                    className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${packType === pt ? "bg-brand-pink text-white border-brand-pink" : "bg-white text-brand-heading border-brand-border hover:border-brand-pink/40"}`}>
-                                    {PACK_TYPE_LABELS[pt]}
+                            {packTypes.map((pt) => (
+                                <button key={pt.name} type="button" onClick={() => setPackType(pt.name)}
+                                    className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${packType === pt.name ? "bg-brand-pink text-white border-brand-pink" : "bg-white text-brand-heading border-brand-border hover:border-brand-pink/40"}`}>
+                                    {pt.label}
                                 </button>
                             ))}
                         </div>
@@ -115,7 +126,7 @@ export default function OutwardClient({ skus: initialSkus, initialBatches }: { s
                                         {(batch.batch_items || []).map((i: any) => `${i.sku?.name ?? "?"} ×${i.quantity}`).join(", ") || "—"}
                                     </p>
                                     <p className="text-xs text-brand-text/60 mt-0.5">
-                                        {PACK_TYPE_LABELS[batch.pack_type as PackType]} · {batch.reason} · {batch.date}
+                                        {packTypeLabel(batch.pack_type)} · {batch.reason} · {batch.date}
                                     </p>
                                 </div>
                                 <span className={`pill pill-${batch.status} shrink-0`}>

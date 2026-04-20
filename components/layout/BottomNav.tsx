@@ -64,6 +64,28 @@ const navItems = [
     },
 ];
 
+const adminOnlyItems = [
+    {
+        href: "/skus",
+        label: "SKUs",
+        icon: (active: boolean) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#EB2676" : "#3B1D0680"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+        ),
+    },
+    {
+        href: "/approvals",
+        label: "Approvals",
+        icon: (active: boolean) => (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#EB2676" : "#3B1D0680"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+            </svg>
+        ),
+    },
+];
+
 export default function BottomNav({ role, pendingCount = 0 }: BottomNavProps) {
     const pathname = usePathname();
 
@@ -71,14 +93,9 @@ export default function BottomNav({ role, pendingCount = 0 }: BottomNavProps) {
         role === "admin"
             ? [
                 ...navItems,
+                adminOnlyItems[0], // SKUs
                 {
-                    href: "/approvals",
-                    label: "Approvals",
-                    icon: (active: boolean) => (
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#EB2676" : "#3B1D0680"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                    ),
+                    ...adminOnlyItems[1], // Approvals
                     badge: pendingCount,
                 },
             ]
@@ -90,12 +107,12 @@ export default function BottomNav({ role, pendingCount = 0 }: BottomNavProps) {
                 {allItems.map((item) => {
                     const active = pathname === item.href || pathname.startsWith(item.href + "/");
                     return (
-                        <Link key={item.href} href={item.href} className="flex flex-col items-center gap-0.5 py-2 px-3 relative min-w-0 flex-1">
+                        <Link key={item.href} href={item.href} prefetch={true} className="flex flex-col items-center gap-0.5 py-2 px-3 relative min-w-0 flex-1">
                             <div className="relative">
                                 {item.icon(active)}
-                                {"badge" in item && item.badge > 0 && (
+                                {"badge" in item && (item.badge ?? 0) > 0 && (
                                     <span className="absolute -top-1.5 -right-1.5 bg-brand-pink text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                                        {item.badge > 9 ? "9+" : item.badge}
+                                        {(item.badge ?? 0) > 9 ? "9+" : item.badge}
                                     </span>
                                 )}
                             </div>

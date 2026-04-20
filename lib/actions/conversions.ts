@@ -3,16 +3,27 @@
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
-export async function createConversion(params: { skuId: string; packs30gIn: number }) {
+export async function createConversion(params: {
+    skuId: string;
+    fromPackType: string;
+    toPackType: string;
+    inputQty: number;
+    outputQty: number;
+}) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
 
-    if (params.packs30gIn <= 0) throw new Error("Packs must be > 0");
+    if (params.inputQty <= 0) throw new Error("Input quantity must be > 0");
+    if (params.outputQty <= 0) throw new Error("Output quantity must be > 0");
+    if (params.fromPackType === params.toPackType) throw new Error("From and To pack types must differ");
 
     const { error } = await supabase.from("wip_conversions").insert({
         sku_id: params.skuId,
-        packs_30g_in: params.packs30gIn,
+        from_pack_type: params.fromPackType,
+        to_pack_type: params.toPackType,
+        input_qty: params.inputQty,
+        output_qty: params.outputQty,
         status: "in_progress",
         created_by: user.id,
     });
@@ -39,35 +50,40 @@ export async function completeConversion(conversionId: string) {
     if (!conv) throw new Error("Conversion not found");
     if (conv.status !== "in_progress") throw new Error("Already completed");
 
-    const { data: stock30g } = await serviceSupabase
+    // Deduct input stock
+    const { data: stockFrom } = await serviceSupabase
         .from("stock_levels")
         .select("quantity, id")
         .eq("sku_id", conv.sku_id)
-        .eq("pack_type", "30g_individual")
+        .eq("pack_type", conv.from_pack_type)
         .single();
 
-    if (stock30g) {
-        const newQty = stock30g.quantity - conv.packs_30g_in;
-        if (newQty < 0) throw new Error("Insufficient 30g stock for conversion");
-        await serviceSupabase
-            .from("stock_levels")
-            .update({ quantity: newQty, updated_at: new Date().toISOString() })
-            .eq("id", stock30g.id);
-    }
+    if (!stockFrom) throw new Error(`No stock record for pack type: ${conv.from_pack_type}`);
+    const newFromQty = stockFrom.quantity - conv.input_qty;
+    if (newFromQty < 0) throw new Error(`Insufficient ${conv.from_pack_type} stock for conversion`);
 
-    const { data: stock6 } = await serviceSupabase
+    await serviceSupabase
+        .from("stock_levels")
+        .update({ quantity: newFromQty, updated_at: new Date().toISOString() })
+        .eq("id", stockFrom.id);
+
+    // Add output stock (upsert in case the row doesn't exist yet)
+    const { data: stockTo } = await serviceSupabase
         .from("stock_levels")
         .select("quantity, id")
         .eq("sku_id", conv.sku_id)
-        .eq("pack_type", "pack_of_6")
+        .eq("pack_type", conv.to_pack_type)
         .single();
 
-    const packsOf6 = Math.floor(conv.packs_30g_in / 6);
-    if (stock6) {
+    if (stockTo) {
         await serviceSupabase
             .from("stock_levels")
-            .update({ quantity: stock6.quantity + packsOf6, updated_at: new Date().toISOString() })
-            .eq("id", stock6.id);
+            .update({ quantity: stockTo.quantity + conv.output_qty, updated_at: new Date().toISOString() })
+            .eq("id", stockTo.id);
+    } else {
+        await serviceSupabase
+            .from("stock_levels")
+            .insert({ sku_id: conv.sku_id, pack_type: conv.to_pack_type, quantity: conv.output_qty });
     }
 
     await serviceSupabase

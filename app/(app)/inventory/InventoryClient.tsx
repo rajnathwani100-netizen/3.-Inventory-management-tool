@@ -2,20 +2,19 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { SKU, PackType, PACK_TYPE_LABELS } from "@/lib/types";
+import { SKU, PackTypeRecord } from "@/lib/types";
 import { getStockStatus, getStockPercentage, groupStockBySku, countLowStockSkus } from "@/lib/utils/stock";
 
 interface Props {
     initialSkus: SKU[];
     initialStockLevels: any[];
+    packTypes: PackTypeRecord[];
 }
 
-const PACK_TYPES: PackType[] = ["30g_individual", "pack_of_6", "sample_200g"];
-
-export default function InventoryClient({ initialSkus, initialStockLevels }: Props) {
+export default function InventoryClient({ initialSkus, initialStockLevels, packTypes }: Props) {
     const [skus] = useState<SKU[]>(initialSkus);
     const [stockLevels, setStockLevels] = useState<any[]>(initialStockLevels);
-    const [activeTab, setActiveTab] = useState<PackType>("30g_individual");
+    const [activeTab, setActiveTab] = useState<string>(packTypes[0]?.name ?? "30g_individual");
     const supabase = createClient();
 
     useEffect(() => {
@@ -30,13 +29,10 @@ export default function InventoryClient({ initialSkus, initialStockLevels }: Pro
     }, []);
 
     const stockMap = groupStockBySku(stockLevels);
-    const total30g = Object.values(stockMap).reduce((sum, s) => sum + (s["30g_individual"] ?? 0), 0);
-    const totalPacks6 = Object.values(stockMap).reduce((sum, s) => sum + (s["pack_of_6"] ?? 0), 0);
-    const totalSamples = Object.values(stockMap).reduce((sum, s) => sum + (s["sample_200g"] ?? 0), 0);
     const lowStockCount = countLowStockSkus(skus, stockMap);
     const lowStockSkus = skus.filter((sku) => {
         const stock = stockMap[sku.id];
-        return !stock || stock["30g_individual"] < sku.low_stock_threshold;
+        return !stock || (stock["30g_individual"] ?? 0) < sku.low_stock_threshold;
     });
 
     return (
@@ -44,20 +40,21 @@ export default function InventoryClient({ initialSkus, initialStockLevels }: Pro
             <h2 className="section-title mb-4">Live Inventory</h2>
 
             <div className="grid grid-cols-2 gap-3 mb-5">
-                <MetricCard label="30g Packs" value={total30g.toLocaleString()} icon="📦" />
-                <MetricCard label="Pack of 6" value={totalPacks6.toLocaleString()} icon="🗃️" />
-                <MetricCard label="200g Samples" value={totalSamples.toLocaleString()} icon="🧪" />
+                {packTypes.slice(0, 3).map((pt) => {
+                    const total = Object.values(stockMap).reduce((sum, s) => sum + (s[pt.name] ?? 0), 0);
+                    return <MetricCard key={pt.name} label={pt.label} value={total.toLocaleString()} icon="📦" />;
+                })}
                 <MetricCard label="Low Stock SKUs" value={lowStockCount} icon="⚠️" alert={lowStockCount > 0} />
             </div>
 
             <div className="flex gap-1 bg-white rounded-xl p-1 border border-brand-border mb-4">
-                {PACK_TYPES.map((pt) => (
+                {packTypes.map((pt) => (
                     <button
-                        key={pt}
-                        onClick={() => setActiveTab(pt)}
-                        className={`flex-1 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${activeTab === pt ? "bg-brand-pink text-white shadow-sm" : "text-brand-text/60 hover:text-brand-heading"}`}
+                        key={pt.name}
+                        onClick={() => setActiveTab(pt.name)}
+                        className={`flex-1 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${activeTab === pt.name ? "bg-brand-pink text-white shadow-sm" : "text-brand-text/60 hover:text-brand-heading"}`}
                     >
-                        {PACK_TYPE_LABELS[pt]}
+                        {pt.label}
                     </button>
                 ))}
             </div>
