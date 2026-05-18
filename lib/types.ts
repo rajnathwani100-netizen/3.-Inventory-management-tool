@@ -30,7 +30,7 @@ export type PackType = string;
 
 export type EntryStatus = "pending" | "approved" | "rejected";
 export type StallStatus = "active" | "closed";
-export type WipStatus = "in_progress" | "completed";
+export type WipStatus = "in_progress" | "completed" | "rejected";
 
 export interface StockLevel {
     id: string;
@@ -88,18 +88,52 @@ export interface StallItem {
     sku?: SKU;
 }
 
+export interface WipConversionItem {
+    id: string;
+    conversion_id: string;
+    sku_id: string;
+    pack_type: string;
+    quantity: number;
+    sku?: SKU;
+}
+
 export interface WipConversion {
     id: string;
-    sku_id: string;
-    from_pack_type: string;
-    to_pack_type: string;
-    input_qty: number;
-    output_qty: number;
+    notes: string | null;
+    date: string;
     status: WipStatus;
     created_by: string | null;
+    approved_by: string | null;
     completed_at: string | null;
     created_at: string;
+    recipe_id: string | null;
+    selected_sku_id: string | null;    // the user-chosen flavour (for single-flavour packs)
+    quantity: number;                   // number of output units being produced
+    inputs?: WipConversionItem[];
+    outputs?: WipConversionItem[];
+    creator?: Profile;
+    approver?: Profile;
+    recipe?: ConversionRecipe;
+}
+
+export interface ConversionRecipeIngredient {
+    id: string;
+    recipe_id: string;
+    input_sku_id: string | null;       // null = "same as selected SKU"
+    input_pack_type: string;
+    qty_per_output_unit: number;
     sku?: SKU;
+}
+
+export interface ConversionRecipe {
+    id: string;
+    name: string;
+    output_sku_id: string | null;      // null = use selected_sku_id at run time
+    output_pack_type: string;
+    is_assorted: boolean;              // true = consume 1 of every active 30g SKU
+    is_active: boolean;
+    sort_order: number;
+    ingredients?: ConversionRecipeIngredient[];
 }
 
 export const INWARD_REASONS = [
