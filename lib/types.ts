@@ -130,7 +130,6 @@ export interface ConversionRecipe {
     name: string;
     output_sku_id: string | null;      // null = use selected_sku_id at run time
     output_pack_type: string;
-    is_assorted: boolean;              // true = consume 1 of every active 30g SKU
     is_active: boolean;
     sort_order: number;
     ingredients?: ConversionRecipeIngredient[];
