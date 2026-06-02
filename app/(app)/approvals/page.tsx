@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ApprovalsClient from "./ApprovalsClient";
 
+export const dynamic = "force-dynamic";
+
 export default async function ApprovalsPage() {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -19,11 +21,27 @@ export default async function ApprovalsPage() {
         );
     }
 
-    const { data: batches } = await supabase
-        .from("entry_batches")
-        .select("*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)")
-        .eq("status", "pending")
-        .order("created_at", { ascending: true });
+    const batchSelect = "*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name), approver:profiles!approved_by(name)";
 
-    return <ApprovalsClient initialBatches={batches ?? []} />;
+    const [{ data: pending }, { data: history }] = await Promise.all([
+        supabase
+            .from("entry_batches")
+            .select(batchSelect)
+            .eq("status", "pending")
+            .order("created_at", { ascending: true }),
+        supabase
+            .from("entry_batches")
+            .select(batchSelect)
+            .in("status", ["approved", "rejected"])
+            .order("approved_at", { ascending: false })
+            .limit(100),
+    ]);
+
+    return (
+        <ApprovalsClient
+            initialPending={pending ?? []}
+            initialHistory={history ?? []}
+            role={profile?.role ?? "staff"}
+        />
+    );
 }
