@@ -6,7 +6,6 @@ import toast from "react-hot-toast";
 
 interface Props {
     initialPending: any[];
-    initialHistory: any[];
     role: string;
 }
 
@@ -15,29 +14,60 @@ type Tab = "pending" | "history";
 const packLabel = (name: string) =>
     ({ "30g_individual": "30g Indv.", "pack_of_6": "Pack of 6", "trio_pack": "Trio Pack", "sample_200g": "200g Sample" }[name] ?? name);
 
-export default function ApprovalsClient({ initialPending, initialHistory, role }: Props) {
+export default function ApprovalsClient({ initialPending, role }: Props) {
     const [tab, setTab] = useState<Tab>("pending");
     const [pending, setPending] = useState(initialPending);
-    const [history, setHistory] = useState(initialHistory);
+    const [history, setHistory] = useState<any[]>([]);
+    const [historyLoaded, setHistoryLoaded] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const [isPending, startTransition] = useTransition();
 
-    // Optimistic removal for pending list
     const [optimisticPending, removePendingOptimistic] = useOptimistic(
         pending,
         (state, removedId: string) => state.filter((b) => b.id !== removedId)
     );
 
-    // ── Refresh helpers ──────────────────────────────────────────────────────
-    const refreshAll = async () => {
+    // ── Load history client-side on demand ───────────────────────────────────
+    const loadHistory = async () => {
+        if (historyLoaded) return;
+        setHistoryLoading(true);
+        try {
+            const { createClient } = await import("@/lib/supabase/client");
+            const sb = createClient();
+            const { data, error } = await sb
+                .from("entry_batches")
+                .select("*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)")
+                .in("status", ["approved", "rejected"])
+                .order("created_at", { ascending: false })
+                .limit(100);
+            if (!error && data) {
+                setHistory(data);
+                setHistoryLoaded(true);
+            } else {
+                toast.error("Could not load history");
+            }
+        } catch {
+            toast.error("Could not load history");
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const handleTabChange = (t: Tab) => {
+        setTab(t);
+        if (t === "history") loadHistory();
+    };
+
+    // ── Refresh pending list ─────────────────────────────────────────────────
+    const refreshPending = async () => {
         const { createClient } = await import("@/lib/supabase/client");
         const sb = createClient();
-        const sel = "*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name), approver:profiles!approved_by(name)";
-        const [{ data: p }, { data: h }] = await Promise.all([
-            sb.from("entry_batches").select(sel).eq("status", "pending").order("created_at", { ascending: true }),
-            sb.from("entry_batches").select(sel).in("status", ["approved", "rejected"]).order("approved_at", { ascending: false }).limit(100),
-        ]);
-        if (p) setPending(p);
-        if (h) setHistory(h);
+        const { data } = await sb
+            .from("entry_batches")
+            .select("*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)")
+            .eq("status", "pending")
+            .order("created_at", { ascending: true });
+        if (data) setPending(data);
     };
 
     // ── Approve ──────────────────────────────────────────────────────────────
@@ -51,10 +81,12 @@ export default function ApprovalsClient({ initialPending, initialHistory, role }
                 } else {
                     toast.success("Entry approved & stock updated");
                 }
-                await refreshAll();
+                await refreshPending();
+                // Reset history so it reloads fresh next time
+                setHistoryLoaded(false);
             } catch (err: any) {
                 toast.error(err.message);
-                await refreshAll();
+                await refreshPending();
             }
         });
     };
@@ -66,10 +98,11 @@ export default function ApprovalsClient({ initialPending, initialHistory, role }
             try {
                 await rejectEntry({ batchId });
                 toast.success("Entry rejected");
-                await refreshAll();
+                await refreshPending();
+                setHistoryLoaded(false);
             } catch (err: any) {
                 toast.error(err.message);
-                await refreshAll();
+                await refreshPending();
             }
         });
     };
@@ -80,7 +113,10 @@ export default function ApprovalsClient({ initialPending, initialHistory, role }
             try {
                 await reverseEntry({ batchId, note });
                 toast.success("✅ Entry reversed — stock has been restored");
-                await refreshAll();
+                // Reload history fresh
+                setHistoryLoaded(false);
+                setHistory([]);
+                await loadHistory();
             } catch (err: any) {
                 toast.error(err.message);
             }
@@ -100,7 +136,7 @@ export default function ApprovalsClient({ initialPending, initialHistory, role }
             {/* ── Tabs ── */}
             <div className="flex gap-1 bg-white rounded-xl p-1 border border-brand-border">
                 {([["pending", "⏳ Pending"], ["history", "📋 History"]] as [Tab, string][]).map(([t, label]) => (
-                    <button key={t} onClick={() => setTab(t)}
+                    <button key={t} onClick={() => handleTabChange(t)}
                         className={`flex-1 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${tab === t ? "bg-brand-pink text-white shadow-sm" : "text-brand-text/60 hover:text-brand-heading"}`}>
                         {label}
                     </button>
@@ -130,14 +166,20 @@ export default function ApprovalsClient({ initialPending, initialHistory, role }
             {/* ══════════════ HISTORY TAB ══════════════ */}
             {tab === "history" && (
                 <div className="space-y-3">
-                    <p className="text-xs text-brand-text/50">{history.length} entries in history (last 100)</p>
-                    {history.length === 0 ? (
+                    {historyLoading ? (
+                        <div className="card text-center py-10 text-brand-text/50 text-sm animate-pulse">
+                            Loading history…
+                        </div>
+                    ) : history.length === 0 ? (
                         <div className="card text-center py-8 text-brand-text/50 text-sm">No history yet</div>
                     ) : (
-                        history.map((batch: any) => (
-                            <HistoryCard key={batch.id} batch={batch}
-                                onReverse={handleReverse} isPending={isPending} />
-                        ))
+                        <>
+                            <p className="text-xs text-brand-text/50">{history.length} entries (last 100)</p>
+                            {history.map((batch: any) => (
+                                <HistoryCard key={batch.id} batch={batch}
+                                    onReverse={handleReverse} isPending={isPending} />
+                            ))}
+                        </>
                     )}
                 </div>
             )}
@@ -202,40 +244,29 @@ function HistoryCard({ batch, onReverse, isPending }: {
     onReverse: (id: string, note: string) => void;
     isPending: boolean;
 }) {
-    const [showReverseModal, setShowReverseModal] = useState(false);
+    const [showModal, setShowModal] = useState(false);
     const [reverseNote, setReverseNote] = useState("");
 
     const isInward = batch.direction === "inward";
-    const isReversed = batch.is_reversed;
+    const isReversed = !!batch.is_reversed;
     const isReversal = !!batch.reversal_of;
 
-    const handleConfirmReverse = () => {
-        onReverse(batch.id, reverseNote);
-        setShowReverseModal(false);
-        setReverseNote("");
-    };
-
     return (
-        <div className={`card space-y-2.5 ${isReversed ? "opacity-60" : ""} ${isReversal ? "border-dashed border-amber-300" : ""}`}>
+        <div className={`card space-y-2.5 ${isReversed ? "opacity-55" : ""} ${isReversal ? "border border-dashed border-amber-300" : ""}`}>
             {/* Header */}
             <div className="flex items-start justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                     <span className={`pill text-xs ${isInward ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-brand-pink"}`}>
                         {isInward ? "↓ Inward" : "↑ Outward"}
                     </span>
-                    {/* Status badge */}
                     {batch.status === "approved" && !isReversed && !isReversal && (
                         <span className="pill bg-green-100 text-green-700 text-xs">✅ Approved</span>
                     )}
                     {batch.status === "rejected" && (
                         <span className="pill bg-red-100 text-red-600 text-xs">✗ Rejected</span>
                     )}
-                    {isReversed && (
-                        <span className="pill bg-gray-100 text-gray-500 text-xs">↩ Reversed</span>
-                    )}
-                    {isReversal && (
-                        <span className="pill bg-amber-100 text-amber-700 text-xs">↩ Reversal Entry</span>
-                    )}
+                    {isReversed && <span className="pill bg-gray-100 text-gray-500 text-xs">↩ Reversed</span>}
+                    {isReversal && <span className="pill bg-amber-100 text-amber-700 text-xs">↩ Reversal</span>}
                 </div>
                 <div className="text-right shrink-0">
                     <p className="text-xs text-brand-text/50">{batch.date}</p>
@@ -259,50 +290,42 @@ function HistoryCard({ batch, onReverse, isPending }: {
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-brand-text/50">
                 <span>📝 {batch.reason}</span>
                 {batch.notes && <span>· {batch.notes}</span>}
-            </div>
-            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-brand-text/40">
-                <span>Submitted by: {batch.submitter?.name ?? "Unknown"}</span>
-                {batch.approver?.name && <span>· {batch.status === "approved" ? "Approved" : "Rejected"} by: {batch.approver.name}</span>}
-                {batch.approved_at && (
-                    <span>· {new Date(batch.approved_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
-                )}
+                <span>· by {batch.submitter?.name ?? "Unknown"}</span>
             </div>
 
-            {/* Reverse info if already reversed */}
+            {/* Reversal info */}
             {isReversed && batch.reversed_at && (
                 <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500">
-                    ↩ Reversed on {new Date(batch.reversed_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    ↩ Reversed {new Date(batch.reversed_at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     {batch.reversal_note && <span> — "{batch.reversal_note}"</span>}
                 </div>
             )}
 
-            {/* Reverse button — only for approved, non-reversed, non-reversal entries */}
+            {/* Reverse button — approved, not yet reversed, not itself a reversal */}
             {batch.status === "approved" && !isReversed && !isReversal && (
                 <div className="pt-1 border-t border-brand-border">
-                    <button
-                        onClick={() => setShowReverseModal(true)}
-                        disabled={isPending}
+                    <button onClick={() => setShowModal(true)} disabled={isPending}
                         className="w-full py-2 rounded-xl text-xs font-semibold border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-50">
                         ↩ Reverse This Entry (undo stock effect)
                     </button>
                 </div>
             )}
 
-            {/* Reverse Confirmation Modal */}
-            {showReverseModal && (
-                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6" onClick={() => setShowReverseModal(false)}>
-                    <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            {/* Confirmation Modal */}
+            {showModal && (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 pb-6"
+                    onClick={() => setShowModal(false)}>
+                    <div className="bg-white rounded-2xl p-5 w-full max-w-sm space-y-4 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}>
                         <div>
                             <h3 className="font-serif text-lg text-brand-heading">Reverse This Entry?</h3>
                             <p className="text-xs text-brand-text/60 mt-1">
-                                This will run the <strong>opposite stock movement</strong> and mark this entry as reversed.
-                                The original entry stays in the audit log — nothing is deleted.
+                                Runs the <strong>opposite stock movement</strong>. The original entry stays in the audit log — nothing is deleted.
                             </p>
                         </div>
 
-                        {/* What will happen */}
                         <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 space-y-1">
-                            <p className="text-xs font-semibold text-amber-800 mb-1.5">What will happen:</p>
+                            <p className="text-xs font-semibold text-amber-800 mb-1.5">Stock changes that will happen:</p>
                             {(batch.batch_items || []).map((item: any) => (
                                 <div key={item.id} className="flex justify-between text-xs text-amber-900">
                                     <span>{item.sku?.name}</span>
@@ -317,23 +340,21 @@ function HistoryCard({ batch, onReverse, isPending }: {
                         </div>
 
                         <div>
-                            <label className="label text-xs">Reason for reversal (optional)</label>
-                            <input
-                                type="text"
-                                value={reverseNote}
+                            <label className="label text-xs">Reason (optional)</label>
+                            <input type="text" value={reverseNote}
                                 onChange={(e) => setReverseNote(e.target.value)}
-                                placeholder="e.g. Entry approved by mistake"
-                                className="input text-sm"
-                                autoFocus
-                            />
+                                placeholder="e.g. Approved by mistake"
+                                className="input text-sm" autoFocus />
                         </div>
 
                         <div className="flex gap-2">
-                            <button onClick={() => setShowReverseModal(false)}
+                            <button onClick={() => setShowModal(false)}
                                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-brand-border text-brand-text/60 hover:bg-gray-50 transition-colors">
                                 Cancel
                             </button>
-                            <button onClick={handleConfirmReverse} disabled={isPending}
+                            <button
+                                onClick={() => { onReverse(batch.id, reverseNote); setShowModal(false); }}
+                                disabled={isPending}
                                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors disabled:opacity-50">
                                 {isPending ? "Reversing…" : "Confirm Reversal"}
                             </button>

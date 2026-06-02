@@ -4,8 +4,6 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { syncToSheets } from "./sheets";
 
-export type { ApproveEntryParams, RejectEntryParams };
-
 interface ApproveEntryParams {
     batchId: string;
 }
