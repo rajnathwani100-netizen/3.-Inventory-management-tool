@@ -21,26 +21,34 @@ export default async function ApprovalsPage() {
         );
     }
 
-    const batchSelect = "*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name), approver:profiles!approved_by(name)";
+    // Simple select — no multi-FK joins to avoid Supabase ambiguity errors
+    const batchSelect = "*, batch_items(*, sku:skus(*)), submitter:profiles!submitted_by(name)";
 
-    const [{ data: pending }, { data: history }] = await Promise.all([
-        supabase
-            .from("entry_batches")
-            .select(batchSelect)
-            .eq("status", "pending")
-            .order("created_at", { ascending: true }),
-        supabase
+    // Fetch pending — this must always succeed
+    const { data: pending } = await supabase
+        .from("entry_batches")
+        .select(batchSelect)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true });
+
+    // Fetch history separately — if it fails, degrade gracefully
+    let history: any[] = [];
+    try {
+        const { data, error } = await supabase
             .from("entry_batches")
             .select(batchSelect)
             .in("status", ["approved", "rejected"])
-            .order("approved_at", { ascending: false })
-            .limit(100),
-    ]);
+            .order("created_at", { ascending: false })
+            .limit(100);
+        if (!error && data) history = data;
+    } catch {
+        // History unavailable — page still works for pending approvals
+    }
 
     return (
         <ApprovalsClient
             initialPending={pending ?? []}
-            initialHistory={history ?? []}
+            initialHistory={history}
             role={profile?.role ?? "staff"}
         />
     );
