@@ -110,15 +110,14 @@ export default function ApprovalsClient({ initialPending, role }: Props) {
     // ── Reverse ──────────────────────────────────────────────────────────────
     const handleReverse = (batchId: string, note: string) => {
         startTransition(async () => {
-            try {
-                await reverseEntry({ batchId, note });
-                toast.success("✅ Entry reversed — stock has been restored");
-                // Reload history fresh
+            const result = await reverseEntry({ batchId, note });
+            if (result.success) {
+                toast.success("Entry reversed — stock restored");
                 setHistoryLoaded(false);
                 setHistory([]);
                 await loadHistory();
-            } catch (err: any) {
-                toast.error(err.message);
+            } else {
+                toast.error(result.error ?? "Reversal failed");
             }
         });
     };
