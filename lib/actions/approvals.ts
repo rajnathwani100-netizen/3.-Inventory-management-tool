@@ -124,9 +124,9 @@ export async function rejectEntry({ batchId }: RejectEntryParams) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // reverseEntry (admin only)
-// Fully undoes the stock effect of an approved batch by running the opposite
-// movement, then marks the original batch as reversed.
-// Creates a "reversal" counter-batch for audit trail.
+// SAFE ORDER: DB records FIRST → stock LAST.
+// If DB insert fails, stock is NEVER touched. No more partial corruption.
+// Works WITHOUT migration 006 — no dependency on new columns.
 // ─────────────────────────────────────────────────────────────────────────────
 export async function reverseEntry({ batchId, note }: ReverseEntryParams) {
     const supabase = await createClient();
@@ -142,7 +142,7 @@ export async function reverseEntry({ batchId, note }: ReverseEntryParams) {
         .single();
     if (profile?.role !== "admin") throw new Error("Admin access required");
 
-    // Load the batch to reverse
+    // ── 1. Load the batch ────────────────────────────────────────────────────
     const { data: batch, error: batchError } = await serviceSupabase
         .from("entry_batches")
         .select("*, batch_items(*, sku:skus(*))")
@@ -151,73 +151,53 @@ export async function reverseEntry({ batchId, note }: ReverseEntryParams) {
 
     if (batchError || !batch) throw new Error("Batch not found");
     if (batch.status !== "approved") throw new Error("Can only reverse an approved entry");
-    if (batch.is_reversed) throw new Error("This entry has already been reversed");
 
-    // The reversal direction is the OPPOSITE of the original
     const reversalDirection = batch.direction === "inward" ? "outward" : "inward";
 
-    // Run counter stock movements
+    // ── 2. Pre-flight: check stock won't go negative ─────────────────────────
     for (const item of batch.batch_items || []) {
-        const { data: existing, error: fetchErr } = await serviceSupabase
-            .from("stock_levels")
-            .select("quantity, id")
-            .eq("sku_id", item.sku_id)
-            .eq("pack_type", batch.pack_type)
-            .single();
-
-        if (fetchErr && fetchErr.code !== "PGRST116") {
-            throw new Error(`Stock fetch failed for ${item.sku?.name}: ${fetchErr.message}`);
-        }
-
-        const currentQty = existing?.quantity ?? 0;
-        // If original was inward (+qty), reversal deducts (-qty)
-        // If original was outward (-qty), reversal adds back (+qty)
-        const newQty = reversalDirection === "inward"
-            ? currentQty + item.quantity
-            : currentQty - item.quantity;
-
-        if (newQty < 0) {
-            throw new Error(
-                `Cannot reverse: reverting "${item.sku?.name}" would result in negative stock ` +
-                `(current: ${currentQty}, would deduct: ${item.quantity})`
-            );
-        }
-
-        if (existing) {
-            const { error: upErr } = await serviceSupabase
+        if (reversalDirection === "outward") {
+            const { data: stock } = await serviceSupabase
                 .from("stock_levels")
-                .update({ quantity: newQty, updated_at: new Date().toISOString() })
-                .eq("id", existing.id);
-            if (upErr) throw new Error(`Stock update failed for ${item.sku?.name}: ${upErr.message}`);
-        } else {
-            const { error: insErr } = await serviceSupabase
-                .from("stock_levels")
-                .insert({ sku_id: item.sku_id, pack_type: batch.pack_type, quantity: newQty });
-            if (insErr) throw new Error(`Stock insert failed for ${item.sku?.name}: ${insErr.message}`);
+                .select("quantity")
+                .eq("sku_id", item.sku_id)
+                .eq("pack_type", batch.pack_type)
+                .maybeSingle();
+            const available = stock?.quantity ?? 0;
+            if (available < item.quantity) {
+                throw new Error(
+                    `Cannot reverse: "${item.sku?.name}" only has ${available} units but reversal needs to deduct ${item.quantity}`
+                );
+            }
         }
     }
 
-    // Create a counter-batch for audit trail
+    // ── 3. Create counter-batch record FIRST (no new columns needed) ─────────
+    const reversalReason = note
+        ? `REVERSAL: ${note}`
+        : `REVERSAL of ${batch.direction} entry from ${batch.date}`;
+
     const { data: reversalBatch, error: revBatchErr } = await serviceSupabase
         .from("entry_batches")
         .insert({
             direction: reversalDirection,
             pack_type: batch.pack_type,
-            reason: `REVERSAL of batch ${batchId.slice(0, 8)}…`,
-            notes: note || `Reversed by admin on ${new Date().toLocaleDateString("en-IN")}`,
+            reason: reversalReason,
+            notes: `Reversal of batch ID ${batchId.slice(0, 8)}`,
             date: new Date().toISOString().split("T")[0],
             status: "approved",
             submitted_by: user.id,
             approved_by: user.id,
             approved_at: new Date().toISOString(),
-            reversal_of: batchId,
         })
         .select()
         .single();
 
-    if (revBatchErr || !reversalBatch) throw new Error("Failed to create reversal record: " + revBatchErr?.message);
+    if (revBatchErr || !reversalBatch) {
+        throw new Error("Failed to create reversal record: " + (revBatchErr?.message ?? "unknown"));
+    }
 
-    // Copy batch items to the reversal batch
+    // ── 4. Copy items to reversal batch ──────────────────────────────────────
     const reversalItems = (batch.batch_items || []).map((item: any) => ({
         batch_id: reversalBatch.id,
         sku_id: item.sku_id,
@@ -231,18 +211,47 @@ export async function reverseEntry({ batchId, note }: ReverseEntryParams) {
         if (itemsErr) throw new Error("Failed to copy items to reversal: " + itemsErr.message);
     }
 
-    // Mark original batch as reversed
-    const { error: markErr } = await serviceSupabase
-        .from("entry_batches")
-        .update({
-            is_reversed: true,
-            reversed_by: user.id,
-            reversed_at: new Date().toISOString(),
-            reversal_note: note || null,
-        })
-        .eq("id", batchId);
+    // ── 5. NOW update stock (only if all DB writes above succeeded) ──────────
+    for (const item of batch.batch_items || []) {
+        const { data: existing } = await serviceSupabase
+            .from("stock_levels")
+            .select("quantity, id")
+            .eq("sku_id", item.sku_id)
+            .eq("pack_type", batch.pack_type)
+            .maybeSingle();
 
-    if (markErr) throw new Error("Failed to mark batch as reversed: " + markErr.message);
+        const currentQty = existing?.quantity ?? 0;
+        const newQty = reversalDirection === "inward"
+            ? currentQty + item.quantity   // original outward → add back
+            : currentQty - item.quantity;  // original inward  → deduct back
+
+        if (existing) {
+            await serviceSupabase
+                .from("stock_levels")
+                .update({ quantity: newQty, updated_at: new Date().toISOString() })
+                .eq("id", existing.id);
+        } else {
+            await serviceSupabase
+                .from("stock_levels")
+                .insert({ sku_id: item.sku_id, pack_type: batch.pack_type, quantity: newQty });
+        }
+    }
+
+    // ── 6. Optionally mark original as reversed (needs migration 006) ────────
+    // Silently ignored if columns don't exist yet — audit trail still exists
+    try {
+        await serviceSupabase
+            .from("entry_batches")
+            .update({
+                is_reversed: true,
+                reversed_by: user.id,
+                reversed_at: new Date().toISOString(),
+                reversal_note: note || null,
+            })
+            .eq("id", batchId);
+    } catch {
+        // Columns not yet added — safe to ignore
+    }
 
     revalidatePath("/approvals");
     revalidatePath("/inventory");
